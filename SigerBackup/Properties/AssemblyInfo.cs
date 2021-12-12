@@ -5,11 +5,11 @@ using System.Runtime.InteropServices;
 // General Information about an assembly is controlled through the following
 // set of attributes. Change these attribute values to modify the information
 // associated with an assembly.
-[assembly: AssemblyTitle("SigerBackup")]
-[assembly: AssemblyDescription("")]
+[assembly: AssemblyTitle("Siger Backup")]
+[assembly: AssemblyDescription("Faça backup completo e apenas arquivos modificado (git).")]
 [assembly: AssemblyConfiguration("")]
 [assembly: AssemblyCompany("Siger's")]
-[assembly: AssemblyProduct("SigerBackup")]
+[assembly: AssemblyProduct("Siger Backup")]
 [assembly: AssemblyCopyright("Copyright © Siger's 2021")]
 [assembly: AssemblyTrademark("")]
 [assembly: AssemblyCulture("")]
