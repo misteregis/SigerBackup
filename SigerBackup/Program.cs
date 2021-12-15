@@ -95,6 +95,10 @@ namespace SigerBackup
                                 Console.WriteLine("Efetuando backup de arquivos modificados...\n");
                                 CompressFile("modified");
                                 break;
+
+                            default:
+                                help();
+                                break;
                         }
 
                         siger_backup_modified.Close();
