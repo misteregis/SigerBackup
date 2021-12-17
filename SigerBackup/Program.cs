@@ -496,14 +496,14 @@ namespace SigerBackup
         public static void pauseApp()
         {
             Console.ResetColor();
-            Console.Write("\nPressione qualquer tecla para continuar...");
+            Console.Write("\nPressione qualquer tecla para continuar...\n");
             Console.ReadKey(true);
         }
 
         public static void exitApp()
         {
             Console.ResetColor();
-            Console.Write("\nPressione qualquer tecla para sair...");
+            Console.Write("\nPressione qualquer tecla para sair...\n");
             Console.ReadKey(true);
             Environment.Exit(0);
         }
