@@ -16,6 +16,7 @@ namespace SigerBackup
     {
         private static string App = Assembly.GetEntryAssembly().Location;
         private static string timestamp = DateTime.Now.ToString("yyyyMMddHHmm");
+        private static string version = Application.ProductVersion;
         private static FolderBrowserDialog backup_dir;
         private static RegistryKey siger_backup_modified_bg;
         private static RegistryKey siger_backup_modified;
@@ -495,17 +496,26 @@ namespace SigerBackup
 
         public static void pauseApp()
         {
-            Console.ResetColor();
-            Console.Write("\nPressione qualquer tecla para continuar...\n");
-            Console.ReadKey(true);
+            showVersion("Pressione qualquer tecla para continuar...");
         }
 
         public static void exitApp()
         {
-            Console.ResetColor();
-            Console.Write("\nPressione qualquer tecla para sair...\n");
-            Console.ReadKey(true);
+            showVersion("Pressione qualquer tecla para sair...");
             Environment.Exit(0);
+        }
+
+        public static void showVersion(string txt = "")
+        {
+            var v = $"v{version}";
+            Console.ResetColor();
+            Console.WriteLine();
+            Console.Write(txt);
+            Console.ForegroundColor = ConsoleColor.DarkGray;
+            Console.CursorLeft = Console.BufferWidth - (v.Length + 2);
+            Console.Write(v);
+            Console.WriteLine();
+            Console.ReadKey(true);
         }
     }
 }
