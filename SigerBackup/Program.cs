@@ -17,23 +17,41 @@ namespace SigerBackup
         private static string App = Assembly.GetEntryAssembly().Location;
         private static string timestamp = DateTime.Now.ToString("yyyyMMddHHmm");
         private static string version = Application.ProductVersion;
+        private static Dictionary<string, string> args = new Dictionary<string, string>();
+        private static List<string> excludes = new List<string>();
         private static FolderBrowserDialog backup_dir;
         private static RegistryKey siger_backup_modified_bg;
         private static RegistryKey siger_backup_modified;
         private static RegistryKey siger_backup_bg;
         private static RegistryKey siger_backup;
-        private static string[] args;
 
         const string keyNameBg = @"Directory\Background\shell\";
         const string keyName = @"Directory\shell\";
 
         [STAThread]
-        static void Main(string[] app_args)
+        static void Main()
         {
-            args = app_args;
-            setTitle();
+            string[] app_args = Environment.GetCommandLineArgs();
+            for (var i = 1; i < app_args.Length; i += 2)
+            {
+                if (app_args[i].StartsWith("-"))
+                {
+                    var key = app_args[i].StartsWith("--") ? app_args[i].Substring(2) : app_args[i];
+                    key = key.StartsWith("-") ? key.Substring(1) : key;
 
-            if (args.Count() > 0 && (args[0] == "-u" || args[0] == "--uninstall"))
+                    if (key == "x" || key == "exclude")
+                        excludes.Add(app_args[i + 1]);
+                    else
+                        if (i + 1 < app_args.Length)
+                            args.Add(key, app_args[i + 1]);
+                        else
+                            args.Add(key, "");
+                }
+            }
+
+            SetTitle();
+
+            if (args.Count() > 0 && (args.ContainsKey("u") || args.ContainsKey("uninstall")))
                 Uninstall();
 
             siger_backup_modified_bg = Registry.ClassesRoot.OpenSubKey($"{keyNameBg}SigerBackupModified", true);
@@ -47,16 +65,46 @@ namespace SigerBackup
             Run();
         }
 
+        /// <summary>
+        /// Obtém o diretório de saída.
+        /// </summary>
+        /// <returns></returns>
+        public static string GetOutputDir()
+        {
+            if (args.ContainsKey("b") || args.ContainsKey("m") || args.ContainsKey("backup") || args.ContainsKey("modified"))
+                return args.ContainsKey("b") ? args["b"] : args.ContainsKey("m") ? args["m"] : args.ContainsKey("backup") ? args["backup"] : args["modified"];
+
+            return string.Empty;
+        }
+
+        /// <summary>
+        /// Obtém a ação da aplicação (backup/modified).
+        /// </summary>
+        /// <returns></returns>
+        public static string GetAction()
+        {
+            var isBackup = args.ContainsKey("b") || args.ContainsKey("backup");
+            var isModified = args.ContainsKey("m") || args.ContainsKey("modified");
+
+            if (isBackup || isModified)
+                return isBackup ? "backup" : (isModified ? "modified" : string.Empty);
+
+            return string.Empty;
+        }
+
+        /// <summary>
+        /// Executa a plicação.
+        /// </summary>
         public static void Run()
         {
             try
             {
-                if (args.Length == 2 && args[1] != string.Empty)
-                    Directory.SetCurrentDirectory(args[1]);
+                if (GetOutputDir() != null)
+                    Directory.SetCurrentDirectory(GetOutputDir());
             }
             catch
             {
-                help();
+                Help();
             }
 
             try
@@ -75,65 +123,63 @@ namespace SigerBackup
                     (cmd_backup.GetValue(null) != null && cmd_backup.GetValue(null).ToString().Contains(App))
                 )
                 {
-                    setTitle("Executando...");
+                    SetTitle("Executando...");
 
-                    if (args.Length > 1)
+                    switch (GetAction())
                     {
-                        var param = args[0].ToLower();
+                        case "backup":
+                            SetTitle("Efetuando backup completo");
+                            Console.WriteLine("Efetuando backup...\n");
+                            CompressFile("backup");
+                            break;
 
-                        switch (param)
-                        {
-                            case "-b":
-                            case "--backup":
-                                setTitle("Efetuando backup completo");
-                                Console.WriteLine("Efetuando backup...\n");
-                                CompressFile("backup");
-                                break;
+                        case "modified":
+                            SetTitle("Efetuando backup apenas modificados");
+                            Console.WriteLine("Efetuando backup de arquivos modificados...\n");
+                            CompressFile("modified");
+                            break;
 
-                            case "-m":
-                            case "--modified":
-                                setTitle("Efetuando backup apenas modificados");
-                                Console.WriteLine("Efetuando backup de arquivos modificados...\n");
-                                CompressFile("modified");
-                                break;
-
-                            default:
-                                help();
-                                break;
-                        }
-
-                        siger_backup_modified.Close();
-                        siger_backup.Close();
-                        exitApp();
+                        default:
+                            Help();
+                            break;
                     }
-                    else
-                        help();
+
+                    siger_backup_modified.Close();
+                    siger_backup.Close();
+                    ExitApp();
                 }
                 else
                     Install();
 
-                if (args.Length < 2)
+                if (args.Count < 2)
                     Environment.Exit(0);
             }
             catch { }
         }
 
-        public static void setTitle(string title = "")
+        /// <summary>
+        /// Atualiza o título da aplicação.
+        /// </summary>
+        /// <param name="title"></param>
+        public static void SetTitle(string title = "")
         {
             Console.Title = "Siger Backup" + (title == "" ? "" : $": {title}");
         }
 
+        /// <summary>
+        /// Instala a aplicação.
+        /// </summary>
         public static void Install()
         {
             if (!IsAdministrator())
             {
-                setTitle("Executando como Administrador...");
+                SetTitle("Executando como Administrador...");
                 Thread.Sleep(1);
                 RunAsAdmin();
             }
             else
             {
-                setTitle("Instalando...");
+                SetTitle("Instalando...");
                 Console.ForegroundColor = ConsoleColor.DarkGreen;
 
                 backup_dir = new FolderBrowserDialog();
@@ -154,20 +200,20 @@ namespace SigerBackup
 
                         if (!cmd_backup_modified.GetValue(null).ToString().Contains(App) || !cmd_backup_modified_bg.GetValue(null).ToString().Contains(App))
                         {
-                            var key = makeKey("SigerBackupModified", "Siger Backup [Modified] (git)");
+                            var key = MakeKey("SigerBackupModified", "Siger Backup [Modified] (git)");
                             siger_backup_modified_bg = key["backup_bg"];
                             siger_backup_modified = key["backup"];
                         }
 
                         if (!cmd_backup.GetValue(null).ToString().Contains(App) || !cmd_backup_bg.GetValue(null).ToString().Contains(App))
                         {
-                            var key = makeKey("SigerBackup", "Siger Backup");
+                            var key = MakeKey("SigerBackup", "Siger Backup");
                             siger_backup_bg = key["backup_bg"];
                             siger_backup = key["backup"];
                         }
 
                         Console.WriteLine("Registro atualizado com êxito!");
-                        pauseApp();
+                        PauseApp();
                     }
                 }
                 catch
@@ -178,24 +224,24 @@ namespace SigerBackup
                     {
                         if (siger_backup_modified == null || null == siger_backup_modified_bg)
                         {
-                            var key = makeKey("SigerBackupModified", "Siger Backup [Modified] (git)");
+                            var key = MakeKey("SigerBackupModified", "Siger Backup [Modified] (git)");
                             siger_backup_modified_bg = key["backup_bg"];
                             siger_backup_modified = key["backup"];
                         }
 
                         if (siger_backup == null || null == siger_backup_bg)
                         {
-                            var key = makeKey("SigerBackup", "Siger Backup");
+                            var key = MakeKey("SigerBackup", "Siger Backup");
                             siger_backup_bg = key["backup_bg"];
                             siger_backup = key["backup"];
                         }
 
-                        setTitle("Instalação concluída!");
+                        SetTitle("Instalação concluída!");
                         Console.Clear();
-                        log("Detalhes da instalação:", "Diretório de backup: ", backup_dir.SelectedPath);
-                        log("Menu de Contexto:", "Backup completo:|Backup apenas modificados:", " Siger Backup| Siger Backup [Modified] (git)");
+                        Log("Detalhes da instalação:", "Diretório de backup: ", backup_dir.SelectedPath);
+                        Log("Menu de Contexto:", "Backup completo:|Backup apenas modificados:", " Siger Backup| Siger Backup [Modified] (git)");
 
-                        pauseApp();
+                        PauseApp();
                     }
                 }
 
@@ -203,17 +249,20 @@ namespace SigerBackup
             }
         }
 
+        /// <summary>
+        /// Desinstala a aplicação.
+        /// </summary>
         public static void Uninstall()
         {
             if (!IsAdministrator())
             {
-                setTitle("Executando como Administrador...");
+                SetTitle("Executando como Administrador...");
                 Thread.Sleep(1);
                 RunAsAdmin();
             }
             else
             {
-                setTitle("Desinstalando...");
+                SetTitle("Desinstalando...");
 
                 Thread.Sleep(1);
 
@@ -235,7 +284,13 @@ namespace SigerBackup
             Environment.Exit(0);
         }
 
-        public static Dictionary<string, RegistryKey> makeKey(string name, string title)
+        /// <summary>
+        /// Cria / atualiza as chaves de registro do Windows.
+        /// </summary>
+        /// <param name="name"></param>
+        /// <param name="title"></param>
+        /// <returns></returns>
+        public static Dictionary<string, RegistryKey> MakeKey(string name, string title)
         {
             RegistryKey key_bg = Registry.ClassesRoot.CreateSubKey($"{keyNameBg}{name}");
             RegistryKey key = Registry.ClassesRoot.CreateSubKey($"{keyName}{name}");
@@ -256,8 +311,8 @@ namespace SigerBackup
 
             var param = (name == "SigerBackup") ? "backup" : "modified";
 
-            cmd_bg.SetValue("", $"\"{App}\" --{param} \"%V\"");
-            cmd.SetValue("", $"\"{App}\" --{param} \"%V\"");
+            cmd_bg.SetValue("", $"\"{App}\" --{param} \"%V\" -x obj");
+            cmd.SetValue("", $"\"{App}\" --{param} \"%V\" -x obj");
 
             var dict = new Dictionary<string, RegistryKey>();
             dict["backup_bg"] = key_bg;
@@ -266,9 +321,12 @@ namespace SigerBackup
             return dict;
         }
 
+        /// <summary>
+        /// Executa a aplicação como Administrador.
+        /// </summary>
         public static void RunAsAdmin()
         {
-            setTitle("Executando como Administrador...");
+            SetTitle("Executando como Administrador...");
 
             Thread.Sleep(1);
 
@@ -276,7 +334,7 @@ namespace SigerBackup
             {
                 UseShellExecute = true,
                 WorkingDirectory = Environment.CurrentDirectory,
-                Arguments = string.Join(" ", args),
+                Arguments = args.ContainsKey("u") ? "--uninstall" : "",
                 FileName = App,
                 Verb = "runas"
             };
@@ -293,32 +351,40 @@ namespace SigerBackup
             Environment.Exit(0);
         }
 
+        /// <summary>
+        /// Verifica se a aplicação está sendo executada como Administrador.
+        /// </summary>
+        /// <returns></returns>
         public static bool IsAdministrator()
         {
             return (new WindowsPrincipal(WindowsIdentity.GetCurrent())).IsInRole(WindowsBuiltInRole.Administrator);
         }
 
+        /// <summary>
+        /// Faz backup completo ou apenas arquivos modificados.
+        /// </summary>
+        /// <param name="cmd"></param>
         private static void CompressFile(string cmd)
         {
             string output = string.Empty;
             string modified = string.Empty;
             List<string> allow_list = new List<string>();
-            string filename = Path.Combine(siger_backup.GetValue("Backup Dir").ToString(), Path.GetFileName($"{args[1]}{getVersion()}_{timestamp}.zip"));
+            string filename = Path.Combine(siger_backup.GetValue("Backup Dir").ToString(), Path.GetFileName($"{GetOutputDir()}{GetVersion()}_{timestamp}.zip"));
 
             if (cmd == "backup")
             {
-                string[] skip = new[] { ".rar", ".env", @"\.git\", ".gitignore", ".gitattributes", $"{Path.GetFileName(args[1])}.lst" };
+                string[] skip = new[] { ".rar", ".env", @"\.git\", ".gitignore", ".gitattributes", $"{Path.GetFileName(GetOutputDir())}.lst" };
 
-                allow_list = Directory.GetFiles(args[1], "*", SearchOption.AllDirectories).ToList();
-
-                foreach (string s in skip)
+                allow_list = Directory.GetFiles(GetOutputDir(), "*", SearchOption.AllDirectories).ToList();
+                MessageBox.Show(String.Join("\n", skip.Concat(excludes)));
+                foreach (string s in skip.Concat(excludes))
                     allow_list = allow_list.Where(a => !a.Contains(s)).ToList();
             }
             else if (cmd == "modified")
             {
                 modified = " (modified)";
-                output += runCommand("git.exe", "diff --name-only --diff-filter=M");
-                output += runCommand("git.exe", "ls-files -o --exclude-standard");
+                output += RunCommand("git.exe", "diff --name-only --diff-filter=M");
+                output += RunCommand("git.exe", "ls-files -o --exclude-standard");
 
                 allow_list = output.Split(
                     new string[] { "\r\n", "\r", "\n" },
@@ -357,7 +423,7 @@ namespace SigerBackup
                     {
                         if (File.Exists(f))
                         {
-                            string file = f.Replace($@"{args[1]}\", "").Replace("\\", "/");
+                            string file = f.Replace($@"{GetOutputDir()}\", "").Replace("\\", "/");
                             string file_path = Path.GetDirectoryName(file) != "" ? Path.GetDirectoryName(file) : "/";
                             Console.WriteLine($"Compactando arquivo {file}");
                             zip.Add(file, file_path);
@@ -382,11 +448,17 @@ namespace SigerBackup
                 Console.ForegroundColor = ConsoleColor.Red;
                 Console.WriteLine("Ocorreu um erro:");
                 Console.WriteLine(ex.Message);
-                exitApp();
+                ExitApp();
             }
         }
 
-        static string runCommand(string file, string args)
+        /// <summary>
+        /// Executa um programa/comando.
+        /// </summary>
+        /// <param name="file"></param>
+        /// <param name="args"></param>
+        /// <returns></returns>
+        static string RunCommand(string file, string args)
         {
             Process process = new Process
             {
@@ -409,22 +481,26 @@ namespace SigerBackup
                 Console.WriteLine($"ERROR[{err}]");
                 siger_backup_modified.Close();
                 siger_backup.Close();
-                exitApp();
+                ExitApp();
             }
             process.WaitForExit();
             return output;
         }
 
-        public static string getVersion()
+        /// <summary>
+        /// Obtém a versão da aplicação.
+        /// </summary>
+        /// <returns></returns>
+        public static string GetVersion()
         {
             string version = string.Empty;
             string fileversion = string.Empty;
 
             foreach(var key in new string[] { "SIGER.php", "APP.php", "SGA.php" })
             {
-                if (File.Exists($@"{args[1]}\core\{key}"))
+                if (File.Exists($@"{GetOutputDir()}\core\{key}"))
                 {
-                    fileversion = $@"{args[1]}\core\{key}";
+                    fileversion = $@"{GetOutputDir()}\core\{key}";
                     break;
                 }
             }
@@ -440,7 +516,14 @@ namespace SigerBackup
             return version;
         }
 
-        public static void log(string title, string _keys, string _values, string _desc = "")
+        /// <summary>
+        /// Log personalizado.
+        /// </summary>
+        /// <param name="title"></param>
+        /// <param name="_keys"></param>
+        /// <param name="_values"></param>
+        /// <param name="_desc"></param>
+        public static void Log(string title, string _keys, string _values, string _desc = "")
         {
             var desc = _desc.Split('|');
             var keys = _keys.Split('|');
@@ -470,13 +553,18 @@ namespace SigerBackup
             Console.WriteLine();
         }
 
-        public static void help()
+        /// <summary>
+        /// Mostra a ajuda da aplicação.
+        /// </summary>
+        public static void Help()
         {
-            setTitle("Como usar..");
+            SetTitle("Como usar..");
+
+            Console.Clear();
             Console.ForegroundColor = ConsoleColor.DarkGray;
             Console.WriteLine("Faz backup (.zip) de uma pasta para o local escolhido na instalação.\n");
 
-            log("Opções:",
+            Log("Opções:",
                 "[-u, --uninstall]|[-m, --modified]|[-b, --backup]",
                 "\tDesinstala esta aplicação.|\tEfetua o backup dos arquivos modificados e/ou não rastreável.|\tEfetua o backup completo.",
                 "Remove as chaves do registro do Windows.|Apenas git!"
@@ -491,21 +579,31 @@ namespace SigerBackup
             Console.ForegroundColor = ConsoleColor.DarkGray;
             Console.WriteLine("\"" + siger_backup.GetValue("Backup Dir") + "\"");
             Console.WriteLine();
-            exitApp();
+            ExitApp();
         }
 
-        public static void pauseApp()
+        /// <summary>
+        /// Continua a aplicação após pressionar qualquer tecla.
+        /// </summary>
+        public static void PauseApp()
         {
-            showVersion("Pressione qualquer tecla para continuar...");
+            ShowVersion("Pressione qualquer tecla para continuar...");
         }
 
-        public static void exitApp()
+        /// <summary>
+        /// Sai da aplicação após pressionar qualquer tecla.
+        /// </summary>
+        public static void ExitApp()
         {
-            showVersion("Pressione qualquer tecla para sair...");
+            ShowVersion("Pressione qualquer tecla para sair...");
             Environment.Exit(0);
         }
 
-        public static void showVersion(string txt = "")
+        /// <summary>
+        /// Mostra um texto (opcional) com a versão do App.
+        /// </summary>
+        /// <param name="txt"></param>
+        public static void ShowVersion(string txt = "")
         {
             var v = $"v{version}";
             Console.ResetColor();
