@@ -14,11 +14,11 @@ namespace SigerBackup
 {
     internal class Program
     {
-        private static string App = Assembly.GetEntryAssembly().Location;
-        private static string timestamp = DateTime.Now.ToString("yyyyMMddHHmm");
-        private static string version = Application.ProductVersion;
-        private static Dictionary<string, string> args = new Dictionary<string, string>();
-        private static List<string> excludes = new List<string>();
+        private static readonly string App = Assembly.GetEntryAssembly().Location;
+        private static readonly string timestamp = DateTime.Now.ToString("yyyyMMddHHmm");
+        private static readonly string version = Application.ProductVersion;
+        private static readonly Dictionary<string, string> args = new Dictionary<string, string>();
+        private static readonly List<string> excludes = new List<string>();
         private static FolderBrowserDialog backup_dir;
         private static RegistryKey siger_backup_modified_bg;
         private static RegistryKey siger_backup_modified;
@@ -182,10 +182,11 @@ namespace SigerBackup
                 SetTitle("Instalando...");
                 Console.ForegroundColor = ConsoleColor.DarkGreen;
 
-                backup_dir = new FolderBrowserDialog();
-
-                backup_dir.Description = "Por favor, escolha o local onde irá salvar os backup's";
-                backup_dir.ShowNewFolderButton = false;
+                backup_dir = new FolderBrowserDialog
+                {
+                    Description = "Por favor, escolha o local onde irá salvar os backup's",
+                    ShowNewFolderButton = false
+                };
 
                 try
                 {
@@ -314,9 +315,11 @@ namespace SigerBackup
             cmd_bg.SetValue("", $"\"{App}\" --{param} \"%V\" -x obj");
             cmd.SetValue("", $"\"{App}\" --{param} \"%V\" -x obj");
 
-            var dict = new Dictionary<string, RegistryKey>();
-            dict["backup_bg"] = key_bg;
-            dict["backup"] = key;
+            var dict = new Dictionary<string, RegistryKey>
+            {
+                ["backup_bg"] = key_bg,
+                ["backup"] = key
+            };
 
             return dict;
         }
@@ -334,7 +337,7 @@ namespace SigerBackup
             {
                 UseShellExecute = true,
                 WorkingDirectory = Environment.CurrentDirectory,
-                Arguments = args.ContainsKey("u") ? "--uninstall" : "",
+                Arguments = args.ContainsKey("u") || args.ContainsKey("uninstall") ? "--uninstall" : "",
                 FileName = App,
                 Verb = "runas"
             };
@@ -376,7 +379,7 @@ namespace SigerBackup
                 string[] skip = new[] { ".rar", ".env", @"\.git\", ".gitignore", ".gitattributes", $"{Path.GetFileName(GetOutputDir())}.lst" };
 
                 allow_list = Directory.GetFiles(GetOutputDir(), "*", SearchOption.AllDirectories).ToList();
-                MessageBox.Show(String.Join("\n", skip.Concat(excludes)));
+
                 foreach (string s in skip.Concat(excludes))
                     allow_list = allow_list.Where(a => !a.Contains(s)).ToList();
             }
@@ -415,9 +418,11 @@ namespace SigerBackup
 
                 if (run_zip)
                 {
-                    var zip = new ZipArchive(filename);
-                    zip.CompressionMethod = CompressionMethod.EnhancedDeflate;
-                    zip.CompressionLevel = 9;
+                    var zip = new ZipArchive(filename)
+                    {
+                        CompressionMethod = CompressionMethod.EnhancedDeflate,
+                        CompressionLevel = 9
+                    };
 
                     foreach (string f in allow_list)
                     {
@@ -425,7 +430,9 @@ namespace SigerBackup
                         {
                             string file = f.Replace($@"{GetOutputDir()}\", "").Replace("\\", "/");
                             string file_path = Path.GetDirectoryName(file) != "" ? Path.GetDirectoryName(file) : "/";
+
                             Console.WriteLine($"Compactando arquivo {file}");
+
                             zip.Add(file, file_path);
                             total++;
                         }
@@ -434,7 +441,11 @@ namespace SigerBackup
                     zip.Close();
 
                     Console.ForegroundColor = ConsoleColor.Green;
-                    Console.WriteLine($"\n  Foi feito backup{modified} de {total} arquivos.");
+
+                    if (total > 1)
+                        Console.WriteLine($"\n  Foram feito backup{modified} de {total} arquivos.");
+                    else
+                        Console.WriteLine($"\n  Foi feito backup{modified} de um arquivo.");
                 }
                 else
                     Console.WriteLine($"  Não há arquivos para fazer backup{modified}.");
@@ -448,6 +459,7 @@ namespace SigerBackup
                 Console.ForegroundColor = ConsoleColor.Red;
                 Console.WriteLine("Ocorreu um erro:");
                 Console.WriteLine(ex.Message);
+
                 ExitApp();
             }
         }
@@ -471,19 +483,25 @@ namespace SigerBackup
                     RedirectStandardError = true
                 }
             };
+
             process.Start();
+
             //* Read the output (or the error)
             string output = process.StandardOutput.ReadToEnd();
             string err = process.StandardError.ReadToEnd();
+
             if (err != "")
             {
                 Console.Clear();
                 Console.WriteLine($"ERROR[{err}]");
+
                 siger_backup_modified.Close();
                 siger_backup.Close();
                 ExitApp();
             }
+
             process.WaitForExit();
+
             return output;
         }
 
@@ -577,8 +595,9 @@ namespace SigerBackup
             Console.ForegroundColor = ConsoleColor.DarkGreen;
             Console.Write("--backup ");
             Console.ForegroundColor = ConsoleColor.DarkGray;
-            Console.WriteLine("\"" + siger_backup.GetValue("Backup Dir") + "\"");
+            Console.WriteLine($"\"{AppDomain.CurrentDomain.BaseDirectory}\"");
             Console.WriteLine();
+
             ExitApp();
         }
 
@@ -606,6 +625,7 @@ namespace SigerBackup
         public static void ShowVersion(string txt = "")
         {
             var v = $"v{version}";
+
             Console.ResetColor();
             Console.WriteLine();
             Console.Write(txt);
