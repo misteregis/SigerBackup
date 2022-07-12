@@ -140,12 +140,14 @@ namespace SigerBackup
                 {
                     var exeFile = new OpenFileDialog
                     {
+                        Title = "Selecione o executável",
                         InitialDirectory = GetOutputDir(),
                         Filter = "C# Executável (*.exe)|*.exe"
                     };
 
                     var xmlFile = new OpenFileDialog
                     {
+                        Title = "Selecione o arquivo de configuração (.xml)",
                         RestoreDirectory = true,
                         Filter = "Arquivo XML (*.xml)|*.xml"
                     };
@@ -153,12 +155,12 @@ namespace SigerBackup
                     if (exeFile.ShowDialog() == DialogResult.OK)
                         _ini.Write("Executable", FileVersionInfo.GetVersionInfo(exeFile.FileName).InternalName, "publish");
                     else
-                        ExitApp();
+                        ExitApp(publishFile);
 
                     if (xmlFile.ShowDialog() == DialogResult.OK)
                         _ini.Write("XMLFile", xmlFile.FileName, "publish");
                     else
-                        ExitApp();
+                        ExitApp(publishFile);
                 }
             }
 
@@ -233,6 +235,12 @@ namespace SigerBackup
             else
             {
                 SetTitle("Instalando...");
+                
+                if (RunCommand("git.exe", "config --global core.safecrlf").Split('\n').First() != "false")
+                    if (MessageBox.Show("Deseja desativar o aviso de LF/CLRL (core.safecrlf)?", "Configuração do Git",
+                            MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.Yes)
+                        RunCommand("git.exe", "config --global core.safecrlf false");
+
                 Console.ForegroundColor = ConsoleColor.DarkGreen;
                 _backupDir = new VistaFolderBrowserDialog
                 {
@@ -252,7 +260,7 @@ namespace SigerBackup
 
                     if (cmdBackup != null && cmdBackupModified != null && cmdBackupModifiedPublish != null && null != cmdBackupBg && null != cmdBackupModifiedBg && null != cmdBackupModifiedPublishBg)
                     {
-                        Console.WriteLine("Atualizando chaves no registro do Windows...");
+                        Console.WriteLine(" Atualizando chaves no registro do Windows...");
 
                         if (!cmdBackupModified.GetValue(null).ToString().Contains(App) || !cmdBackupModifiedBg.GetValue(null).ToString().Contains(App))
                         {
@@ -275,13 +283,13 @@ namespace SigerBackup
                             _sigerBackupModifiedPublish = key["backup"];
                         }
 
-                        Console.WriteLine("Registro atualizado com êxito!");
+                        Console.WriteLine(" Registro atualizado com êxito!");
                         PauseApp();
                     }
                 }
                 catch
                 {
-                    Console.WriteLine("Criando chaves no registro do Windows...");
+                    Console.WriteLine(" Criando chaves no registro do Windows...");
 
                     // ReSharper disable once PossibleInvalidOperationException
                     if ((bool)_backupDir.ShowDialog())
@@ -356,7 +364,7 @@ namespace SigerBackup
                     main.Close();
                 }
 
-                Console.WriteLine("Desinstalado com sucesso!");
+                Console.WriteLine(" Desinstalado com sucesso!");
                 Thread.Sleep(1250);
             }
 
@@ -485,7 +493,11 @@ namespace SigerBackup
                     {
                         modified = " (modified) [publish]";
 
-                        versionInfo = FileVersionInfo.GetVersionInfo(_ini.Read("Executable", "publish"));
+                        var executable = _ini.Read("Executable", "publish");
+
+                        if (!executable.Contains("\\")) executable = $"{GetOutputDir()}\\{executable}";
+
+                        versionInfo = FileVersionInfo.GetVersionInfo(executable);
 
                         if (!string.IsNullOrEmpty(RunCommand("git.exe", $"log --grep=v{versionInfo.ProductVersion}", false)))
                         {
@@ -496,12 +508,6 @@ namespace SigerBackup
                         var name = Path.GetFileNameWithoutExtension(versionInfo.InternalName);
                         var zipName = $"{name} Update.zip".Replace(" ", "_");
                         var xmlFile = _ini.Read("XMLFile", "publish");
-
-                        var xml = XElement.Load(xmlFile);
-
-                        // ReSharper disable once PossibleNullReferenceException
-                        xml.Element("version").Value = versionInfo.ProductVersion;
-                        xml.Save(xmlFile);
 
                         filename = Path.Combine(Path.GetDirectoryName(xmlFile) ?? string.Empty, zipName);
                     }
@@ -554,6 +560,13 @@ namespace SigerBackup
                     {
                         RunCommand("git.exe", "add .");
                         RunCommand("git.exe", $"commit -m \"v{versionInfo.ProductVersion}\"");
+
+                        var xmlFile = _ini.Read("XMLFile", "publish");
+                        var xml = XElement.Load(xmlFile);
+
+                        // ReSharper disable once PossibleNullReferenceException
+                        xml.Element("version").Value = versionInfo.ProductVersion;
+                        xml.Save(xmlFile);
                     }
 
                     Console.WriteLine(total > 1
@@ -656,7 +669,7 @@ namespace SigerBackup
             var splitValues = values.Split('|');
 
             Console.ResetColor();
-            Console.WriteLine($"{title}{(title.GetLast(1) != ":" ? ":" : "")}");
+            Console.WriteLine($" {title}{(title.GetLast(1) != ":" ? ":" : "")}");
 
             for (var i = 0; i < splitKeys.Length; i++)
             {
@@ -688,7 +701,7 @@ namespace SigerBackup
 
             Console.Clear();
             Console.ForegroundColor = ConsoleColor.DarkGray;
-            Console.WriteLine("Faz backup (.zip) de uma pasta para o local escolhido na instalação.\n");
+            Console.WriteLine(" Faz backup (.zip) de uma pasta para o local escolhido na instalação.\n");
 
             Log("Opções:",
                 "[-u, --uninstall]|[-m, --modified]|[-p, --publish]|[-b, --backup]",
@@ -697,7 +710,7 @@ namespace SigerBackup
             );
 
             Console.ResetColor();
-            Console.WriteLine("Exemplo:");
+            Console.WriteLine(" Exemplo:");
             Console.ForegroundColor = ConsoleColor.DarkGray;
             Console.Write($"  {AppDomain.CurrentDomain.FriendlyName} ");
             Console.ForegroundColor = ConsoleColor.DarkGreen;
@@ -720,8 +733,10 @@ namespace SigerBackup
         /// <summary>
         /// Sai da aplicação após pressionar qualquer tecla.
         /// </summary>
-        public static void ExitApp()
+        public static void ExitApp(string publishFile = null)
         {
+            if (publishFile != null) File.Delete(publishFile);
+
             ShowVersion("Pressione qualquer tecla para sair...");
             Environment.Exit(0);
         }
