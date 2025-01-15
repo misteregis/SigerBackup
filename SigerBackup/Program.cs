@@ -3,8 +3,11 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Net;
 using System.Reflection;
+using System.Security.Policy;
 using System.Security.Principal;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Windows.Forms;
 using System.Xml.Linq;
@@ -12,6 +15,7 @@ using Ionic.Zip;
 using Microsoft.Win32;
 using Ookii.Dialogs.Wpf;
 using SigerBackup.Classes;
+using static System.Windows.Forms.Design.AxImporter;
 using OpenFileDialog = System.Windows.Forms.OpenFileDialog;
 
 namespace SigerBackup
@@ -30,6 +34,7 @@ namespace SigerBackup
         private static RegistryKey _sigerBackupModified;
         private static RegistryKey _sigerBackupBg;
         private static RegistryKey _sigerBackup;
+        private static bool _isFTP = false;
         private static string _arg;
 
         private const string KeyNameBg = @"Directory\Background\shell\";
@@ -62,7 +67,7 @@ namespace SigerBackup
                         Args.Add(key, "");
                 }
             }
-            
+
             SetTitle();
 
             if (Args.Count > 0 && (Args.ContainsKey("u") || Args.ContainsKey("uninstall")))
@@ -177,24 +182,28 @@ namespace SigerBackup
                         case "backup":
                             SetTitle("Efetuando backup completo");
                             Console.WriteLine(" Efetuando backup...\n");
-                            CompressFile(action);
                             break;
 
                         case "modified":
                             SetTitle("Efetuando backup apenas modificados");
                             Console.WriteLine(" Efetuando backup de arquivos modificados...\n");
-                            CompressFile(action);
                             break;
 
                         case "publish":
                             SetTitle("Efetuando backup (publish) apenas modificados");
                             Console.WriteLine(" Efetuando backup de arquivos modificados (publish)...\n");
-                            CompressFile(action);
                             break;
 
                         default:
                             Help();
                             break;
+                    }
+
+                    var allowedActions = new List<String> { "backup", "modified", "publish" };
+
+                    if (allowedActions.Any(key => key == action))
+                    {
+                        CompressFile(action);
                     }
 
                     CloseRegistry();
@@ -206,9 +215,9 @@ namespace SigerBackup
                 if (Args.Count < 2)
                     Environment.Exit(0);
             }
-            catch
+            catch (Exception ex)
             {
-                // ignored
+                Exception(ex);
             }
         }
 
@@ -235,7 +244,7 @@ namespace SigerBackup
             else
             {
                 SetTitle("Instalando...");
-                
+
                 if (RunCommand("git.exe", "config --global core.safecrlf").Split('\n').First() != "false")
                     if (MessageBox.Show("Deseja desativar o aviso de LF/CLRL (core.safecrlf)?", "Configuração do Git",
                             MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.Yes)
@@ -463,28 +472,28 @@ namespace SigerBackup
         private static void CompressFile(string cmd)
         {
             var output = string.Empty;
+            var zipName = string.Empty;
             var modified = string.Empty;
             var allowList = new List<string>();
             var filename = Path.Combine(_sigerBackup.GetValue("Backup Dir").ToString(), Path.GetFileName($"{GetOutputDir()}{GetVersion()}_{Timestamp}.zip"));
+
             FileVersionInfo versionInfo = null;
 
             switch (cmd)
             {
                 case "backup":
-                {
                     var skip = new[] { ".rar", ".env", @"\.git\", ".gitignore", ".gitattributes", ".gitkeep", $"{Path.GetFileName(GetOutputDir())}.lst" };
 
                     allowList = Directory.GetFiles(GetOutputDir(), "*", SearchOption.AllDirectories).ToList();
 
                     allowList = skip.Concat(Excludes).Aggregate(allowList, (current, s) => current.Where(a => !a.Contains(s)).ToList());
-                    
+
                     break;
-                }
+
                 case "modified":
                 case "publish":
-                {
                     RunCommand("git.exe", "init");
-                
+
                     modified = " (modified)";
                     output += RunCommand("git.exe", "diff --name-only --diff-filter=M");
                     output += RunCommand("git.exe", "ls-files -o --exclude-standard");
@@ -495,7 +504,10 @@ namespace SigerBackup
 
                         var executable = _ini.Read("Executable", "publish");
 
-                        if (!executable.Contains("\\")) executable = $"{GetOutputDir()}\\{executable}";
+                        if (!executable.Contains("\\"))
+                        {
+                            executable = $"{GetOutputDir()}\\{executable}";
+                        }
 
                         versionInfo = FileVersionInfo.GetVersionInfo(executable);
 
@@ -506,10 +518,19 @@ namespace SigerBackup
                         }
 
                         var name = Path.GetFileNameWithoutExtension(versionInfo.InternalName);
-                        var zipName = $"{name} Update.zip".Replace(" ", "_");
                         var xmlFile = _ini.Read("XMLFile", "publish");
 
+                        zipName = $"{name} Update v{versionInfo.ProductVersion}.zip".Replace(" ", "_");
                         filename = Path.Combine(Path.GetDirectoryName(xmlFile) ?? string.Empty, zipName);
+
+                        if (IsValidUrl(xmlFile))
+                        {
+                            Uri uri = new Uri(xmlFile);
+
+                            filename = xmlFile.Replace(Path.GetFileName(uri.LocalPath), zipName);
+
+                            _isFTP = true;
+                        }
                     }
 
                     allowList = output.Split(
@@ -518,7 +539,6 @@ namespace SigerBackup
                     ).ToList();
 
                     break;
-                }
             }
 
             try
@@ -531,8 +551,10 @@ namespace SigerBackup
 
                 Console.ForegroundColor = ConsoleColor.DarkYellow;
 
-                if (File.Exists(filename))
+                if (!_isFTP && File.Exists(filename))
+                {
                     File.Delete(filename);
+                }
 
                 if (runZip)
                 {
@@ -551,10 +573,19 @@ namespace SigerBackup
                             total++;
                         }
 
-                        zip.Save(filename);
-                    }
+                        if (_isFTP)
+                        {
+                            var tempFile = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid()}.zip");
 
-                    Console.ForegroundColor = ConsoleColor.Green;
+                            zip.Save(tempFile);
+
+                            UploadFileToFtp(filename, tempFile);
+                        }
+                        else
+                        {
+                            zip.Save(filename);
+                        }
+                    }
 
                     if (cmd == "publish" && versionInfo != null)
                     {
@@ -566,9 +597,26 @@ namespace SigerBackup
 
                         // ReSharper disable once PossibleNullReferenceException
                         xml.Element("version").Value = versionInfo.ProductVersion;
-                        xml.Save(xmlFile);
+                        xml.Element("url").Value = filename;
+
+                        if (_isFTP)
+                        {
+                            var tempXMLFile = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid()}.xml");
+
+                            xml.Save(tempXMLFile);
+
+                            UploadFileToFtp(xmlFile, tempXMLFile);
+                        } else
+                        {
+                            xml.Save(xmlFile);
+                        }
                     }
 
+                    Console.ForegroundColor = ConsoleColor.Green;
+                    Console.Write($"\nArquivo: ");
+                    Console.ForegroundColor = ConsoleColor.Yellow;
+                    Console.WriteLine(zipName);
+                    Console.ForegroundColor = ConsoleColor.Green;
                     Console.WriteLine(total > 1
                         ? $"\n  Foram feito backup{modified} de {total} arquivos."
                         : $"\n  Foi feito backup{modified} de um arquivo.");
@@ -578,14 +626,7 @@ namespace SigerBackup
             }
             catch (Exception ex)
             {
-                CloseRegistry();
-
-                Console.Clear();
-                Console.ForegroundColor = ConsoleColor.Red;
-                Console.WriteLine("Ocorreu um erro:");
-                Console.WriteLine(ex.Message);
-
-                ExitApp();
+                Exception(ex);
             }
         }
 
@@ -639,14 +680,14 @@ namespace SigerBackup
             foreach(var key in new[] { "SIGER.php", "APP.php", "SGA.php" })
             {
                 if (!File.Exists($@"{GetOutputDir()}\core\{key}")) continue;
-                
+
                 fileversion = $@"{GetOutputDir()}\core\{key}";
-                
+
                 break;
             }
 
             if (fileversion == string.Empty) return version;
-            
+
             var lines = File.ReadAllLines(fileversion);
 
             if (lines.Any(t => t.Contains("VERSION")))
@@ -783,7 +824,7 @@ namespace SigerBackup
 
         public static bool CheckAppPath()
         {
-            var notInstalled = _sigerBackup == null || 
+            var notInstalled = _sigerBackup == null ||
                                 _sigerBackupBg == null ||
                                 _sigerBackupModified == null ||
                                 _sigerBackupModifiedBg == null ||
@@ -809,6 +850,68 @@ namespace SigerBackup
             if (!run) Install();
 
             return run;
+        }
+
+        public static void Exception(Exception ex)
+        {
+            CloseRegistry();
+
+            Console.Clear();
+            Console.ForegroundColor = ConsoleColor.Red;
+
+#if (DEBUG)
+            Console.WriteLine(ex);
+#else
+                Console.WriteLine("Ocorreu um erro:");
+                Console.WriteLine(ex.Message);
+#endif
+
+            ExitApp();
+        }
+
+        /// <summary>
+        /// Função para verificar se uma string começa com ftp://, http:// ou https://
+        /// </summary>
+        /// <param name="url"></param>
+        /// <returns>Um boolean</returns>
+        public static bool IsValidUrl(string url)
+        {
+            // Padrão de regex para encontrar strings iniciadas com ftp://, http:// ou https://
+            string pattern = @"^(ftp|http|https)://";
+
+            Regex regex = new Regex(pattern);
+
+            return regex.IsMatch(url);
+        }
+
+        public static bool UploadFileToFtp(string remoteFile, string localFile, string username = null, string password = null)
+        {
+            var request = (FtpWebRequest)WebRequest.Create(remoteFile);
+
+            if (username != null && null != password)
+            {
+                request.Credentials = new NetworkCredential(username, password);
+            }
+
+            request.Method = WebRequestMethods.Ftp.UploadFile;
+            request.UsePassive = true;
+            request.UseBinary = true;
+            request.KeepAlive = false;
+
+            using (var fileStream = File.OpenRead(localFile))
+            {
+                using (var requestStream = request.GetRequestStream())
+                {
+                    fileStream.CopyTo(requestStream);
+                    requestStream.Close();
+                }
+            }
+
+            var response = (FtpWebResponse)request.GetResponse();
+
+            response.Close();
+
+            return (int) response.StatusCode == 200;
         }
     }
 }
